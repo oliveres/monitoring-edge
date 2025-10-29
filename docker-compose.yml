@@ -16,6 +16,7 @@ services:
     user: "nobody"
     networks:
       - monitoring
+      - prod_net  # Access to production network (for Caddy, PostgreSQL, etc.)
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -99,7 +100,7 @@ services:
     restart: unless-stopped
     networks:
       - monitoring
-      - postgres_net  # External network to reach PostgreSQL
+      - prod_net  # External network to reach PostgreSQL
     expose:
       - 9187
     environment:
@@ -123,7 +124,7 @@ services:
     restart: unless-stopped
     networks:
       - monitoring
-      - postgres_net
+      - prod_net
     expose:
       - 9127
     command:
@@ -136,6 +137,6 @@ volumes:
 networks:
   monitoring:
     driver: bridge
-  postgres_net:
+  prod_net:
     external: true
-    name: ${POSTGRES_NETWORK:-postgres-network}
+    name: ${PROD_NETWORK:-production-network}

@@ -23,7 +23,7 @@ Activate profiles with e.g. `COMPOSE_PROFILES=postgres docker compose up -d`. In
 
 - Docker 20.10+ and Docker Compose v2
 - Reachable central Prometheus/Loki endpoints (via VPC or HTTPS)
-- For database exporters: an external Docker network (`POSTGRES_NETWORK`) that reaches PostgreSQL/PgBouncer
+- For database exporters: an external Docker network (`PROD_NETWORK`) that reaches PostgreSQL/PgBouncer/Caddy
 
 ## Deployment
 
@@ -61,7 +61,7 @@ See `.env.example` for the authoritative list. Key entries:
 
 - `POSTGRES_DATA_SOURCE_NAME` – DSN consumed by `postgres-exporter`.
 - `POSTGRES_EXPORTER_TARGET` – usually `postgres-exporter:9187`; leave blank to disable the job.
-- `POSTGRES_NETWORK` – external Docker network that reaches the database or PgBouncer.
+- `PROD_NETWORK` – external Docker network that reaches the database, PgBouncer, and Caddy.
 
 ### PgBouncer (`pgbouncer` profile)
 
