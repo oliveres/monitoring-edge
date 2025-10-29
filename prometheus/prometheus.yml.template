@@ -1,0 +1,110 @@
+# Edge Prometheus Agent Configuration
+# Scrapes local exporters and forwards to central via remote write
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    host: '${HOSTNAME}'
+    role: 'edge'
+
+# Scrape local exporters
+scrape_configs:
+  - job_name: 'cadvisor'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          host: '${HOSTNAME}'
+
+  - job_name: 'node-exporter'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          host: '${HOSTNAME}'
+    relabel_configs:
+      - target_label: instance
+        replacement: '${HOSTNAME}'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: node_uname_info
+        target_label: nodename
+        replacement: '${HOSTNAME}'
+
+  # Optional: scrape local Caddy metrics when CADDY_METRICS_TARGET is set
+  - job_name: 'caddy'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['${CADDY_METRICS_TARGET}']
+        labels:
+          host: '${HOSTNAME}'
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '^$'
+        action: drop
+
+  # Self-monitoring
+  - job_name: 'prometheus'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          host: '${HOSTNAME}'
+          instance: 'edge-prometheus'
+
+  # PostgreSQL/TimescaleDB monitoring (enabled when POSTGRES_EXPORTER_TARGET is set)
+  - job_name: 'postgres'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['${POSTGRES_EXPORTER_TARGET}']
+        labels:
+          host: '${HOSTNAME}'
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '^$'
+        action: drop
+
+  # PgBouncer monitoring (enabled when PGBOUNCER_EXPORTER_TARGET is set)
+  - job_name: 'pgbouncer'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['${PGBOUNCER_EXPORTER_TARGET}']
+        labels:
+          host: '${HOSTNAME}'
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '^$'
+        action: drop
+
+# Remote write to central Prometheus
+remote_write:
+  - url: '${CENTRAL_PROMETHEUS_URL}'
+    # Basic auth for remote VPS (leave empty for VPC)
+    basic_auth:
+      username: '${BASIC_AUTH_USER}'
+      password: '${BASIC_AUTH_PASSWORD}'
+
+    # Queue configuration for reliability
+    queue_config:
+      capacity: 10000
+      max_shards: 10
+      min_shards: 1
+      max_samples_per_send: 5000
+      batch_send_deadline: 5s
+      min_backoff: 30ms
+      max_backoff: 5s
+
+    # Retry configuration
+    metadata_config:
+      send: true
+      send_interval: 1m
+
+    # Write relabeling (optional)
+    write_relabel_configs:
+      # Ensure host label is present
+      - source_labels: [__name__]
+        regex: '.*'
+        target_label: host
+        replacement: '${HOSTNAME}'
+        action: replace

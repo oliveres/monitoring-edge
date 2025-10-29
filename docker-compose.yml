@@ -1,0 +1,141 @@
+services:
+  prometheus:
+    build:
+      context: ./prometheus
+      dockerfile: Dockerfile
+      args:
+        HOSTNAME: ${HOSTNAME:-edge-host}
+        CENTRAL_PROMETHEUS_URL: ${CENTRAL_PROMETHEUS_URL}
+        BASIC_AUTH_USER: ${BASIC_AUTH_USER:-}
+        BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD:-}
+        CADDY_METRICS_TARGET: ${CADDY_METRICS_TARGET:-}
+        POSTGRES_EXPORTER_TARGET: ${POSTGRES_EXPORTER_TARGET:-}
+        PGBOUNCER_EXPORTER_TARGET: ${PGBOUNCER_EXPORTER_TARGET:-}
+    container_name: monitoring-prometheus
+    restart: unless-stopped
+    user: "nobody"
+    networks:
+      - monitoring
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=0'  # Zero retention - pure agent mode
+      - '--web.listen-address=0.0.0.0:9090'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - cadvisor
+      - node-exporter
+
+  promtail:
+    build:
+      context: ./promtail
+      dockerfile: Dockerfile
+    container_name: monitoring-promtail
+    restart: unless-stopped
+    user: "0:0"
+    networks:
+      - monitoring
+    # command removed - using ENTRYPOINT from Dockerfile with -config.expand-env=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+      - promtail-data:/tmp
+    environment:
+      - HOSTNAME=${HOSTNAME:-edge-host}
+      - CENTRAL_LOKI_URL=${CENTRAL_LOKI_URL}
+      - BASIC_AUTH_USER=${BASIC_AUTH_USER:-}
+      - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-}
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: monitoring-cadvisor
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - monitoring
+    expose:
+      - 8080
+    command:
+      - '-housekeeping_interval=15s'
+      - '-docker_only=true'
+      - '-store_container_labels=false'
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: monitoring-node-exporter
+    restart: unless-stopped
+    networks:
+      - monitoring
+    expose:
+      - 9100
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host
+      - --collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /:/host:ro,rslave
+
+  postgres-exporter:
+    profiles:
+      - postgres
+    build:
+      context: ./postgres-exporter
+      dockerfile: Dockerfile
+    container_name: monitoring-postgres-exporter
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - postgres_net  # External network to reach PostgreSQL
+    expose:
+      - 9187
+    environment:
+      # PostgreSQL connection string - set in Portainer
+      DATA_SOURCE_NAME: "${POSTGRES_DATA_SOURCE_NAME}"
+
+      # Enable custom TimescaleDB queries
+      PG_EXPORTER_EXTEND_QUERY_PATH: "/etc/queries.yaml"
+
+      # Additional metrics
+      PG_EXPORTER_DISABLE_DEFAULT_METRICS: "false"
+      PG_EXPORTER_DISABLE_SETTINGS_METRICS: "false"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+      PG_EXPORTER_INCLUDE_DATABASES: "*"
+
+  pgbouncer-exporter:
+    profiles:
+      - pgbouncer
+    image: spreaker/prometheus-pgbouncer-exporter:latest
+    container_name: monitoring-pgbouncer-exporter
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - postgres_net
+    expose:
+      - 9127
+    command:
+      - '--pgBouncer.connString=${PGBOUNCER_EXPORTER_CONN_STRING}'
+      - '--web.listen-address=0.0.0.0:9127'
+
+volumes:
+  promtail-data:
+
+networks:
+  monitoring:
+    driver: bridge
+  postgres_net:
+    external: true
+    name: ${POSTGRES_NETWORK:-postgres-network}

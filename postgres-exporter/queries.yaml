@@ -1,0 +1,206 @@
+# Custom queries for TimescaleDB monitoring
+# Updated for meters.measurements hypertable and custom views
+
+# Metriky z prometheus_chunk_metrics view
+pg_chunk_metrics:
+  query: "SELECT metric_name::text, value::float FROM meters.prometheus_chunk_metrics"
+  metrics:
+    - metric_name:
+        usage: "LABEL"
+        description: "Metric name"
+    - value:
+        usage: "GAUGE"
+        description: "Metric value"
+
+# Metriky z prometheus_data_metrics view  
+pg_data_metrics:
+  query: "SELECT metric_name::text, value::float FROM meters.prometheus_data_metrics"
+  metrics:
+    - metric_name:
+        usage: "LABEL"
+        description: "Metric name"
+    - value:
+        usage: "GAUGE"
+        description: "Metric value"
+
+# Detailní informace o chunků
+timescaledb_chunk_details:
+  query: |
+    SELECT 
+      hypertable_schema,
+      hypertable_name,
+      chunk_schema,
+      chunk_name,
+      EXTRACT(EPOCH FROM (now() - range_start)) as chunk_age_seconds,
+      EXTRACT(EPOCH FROM (range_end - range_start)) as chunk_interval_seconds,
+      CASE WHEN is_compressed THEN 1 ELSE 0 END as is_compressed,
+      pg_total_relation_size((chunk_schema || '.' || chunk_name)::regclass) as chunk_size_bytes
+    FROM timescaledb_information.chunks
+    WHERE hypertable_schema = 'meters' 
+    AND hypertable_name = 'measurements'
+  metrics:
+    - hypertable_schema:
+        usage: "LABEL"
+    - hypertable_name:
+        usage: "LABEL"
+    - chunk_schema:
+        usage: "LABEL"
+    - chunk_name:
+        usage: "LABEL"
+    - chunk_age_seconds:
+        usage: "GAUGE"
+        description: "Age of chunk in seconds"
+    - chunk_interval_seconds:
+        usage: "GAUGE"
+        description: "Time interval covered by chunk in seconds"
+    - is_compressed:
+        usage: "GAUGE"
+        description: "Whether chunk is compressed (1) or not (0)"
+    - chunk_size_bytes:
+        usage: "GAUGE"
+        description: "Size of chunk in bytes"
+
+# Hypertable statistiky
+timescaledb_hypertable_stats:
+  query: |
+    SELECT 
+      hypertable_schema,
+      hypertable_name,
+      num_dimensions,
+      num_chunks,
+      CASE WHEN compression_enabled THEN 1 ELSE 0 END as compression_enabled,
+      (SELECT COUNT(*) FROM timescaledb_information.chunks 
+       WHERE hypertable_schema = h.hypertable_schema 
+       AND hypertable_name = h.hypertable_name 
+       AND is_compressed = true) as compressed_chunks
+    FROM timescaledb_information.hypertables h
+    WHERE hypertable_schema = 'meters'
+  metrics:
+    - hypertable_schema:
+        usage: "LABEL"
+    - hypertable_name:
+        usage: "LABEL"
+    - num_dimensions:
+        usage: "GAUGE"
+        description: "Number of dimensions"
+    - num_chunks:
+        usage: "GAUGE"
+        description: "Total number of chunks"
+    - compression_enabled:
+        usage: "GAUGE"
+        description: "Whether compression is enabled"
+    - compressed_chunks:
+        usage: "GAUGE"
+        description: "Number of compressed chunks"
+
+# Background jobs
+timescaledb_jobs:
+  query: |
+    SELECT 
+      j.job_id,
+      j.application_name,
+      j.proc_schema,
+      j.proc_name,
+      js.hypertable_schema,
+      js.hypertable_name,
+      CASE 
+        WHEN js.last_successful_finish IS NOT NULL 
+        THEN EXTRACT(EPOCH FROM (now() - js.last_successful_finish))
+        ELSE -1 
+      END as seconds_since_last_success,
+      coalesce(js.total_runs, 0) as total_runs,
+      coalesce(js.total_successes, 0) as total_successes,
+      coalesce(js.total_failures, 0) as total_failures,
+      CASE WHEN j.scheduled THEN 1 ELSE 0 END as is_scheduled
+    FROM timescaledb_information.jobs j
+    LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
+    WHERE js.hypertable_schema = 'meters' OR js.hypertable_schema IS NULL
+  metrics:
+    - job_id:
+        usage: "LABEL"
+    - application_name:
+        usage: "LABEL"
+    - proc_schema:
+        usage: "LABEL"
+    - proc_name:
+        usage: "LABEL"
+    - hypertable_schema:
+        usage: "LABEL"
+    - hypertable_name:
+        usage: "LABEL"
+    - seconds_since_last_success:
+        usage: "GAUGE"
+        description: "Seconds since last successful run"
+    - total_runs:
+        usage: "COUNTER"
+        description: "Total number of runs"
+    - total_successes:
+        usage: "COUNTER"
+        description: "Total successful runs"
+    - total_failures:
+        usage: "COUNTER"
+        description: "Total failed runs"
+    - is_scheduled:
+        usage: "GAUGE"
+        description: "Whether job is scheduled"
+
+# Continuous aggregates (pokud je vytvoříte)
+timescaledb_continuous_aggregates:
+  query: |
+    SELECT 
+      view_schema,
+      view_name,
+      hypertable_schema,
+      hypertable_name,
+      CASE WHEN materialized_only THEN 1 ELSE 0 END as is_materialized_only,
+      CASE WHEN compression_enabled THEN 1 ELSE 0 END as is_compression_enabled
+    FROM timescaledb_information.continuous_aggregates
+    WHERE hypertable_schema = 'meters' OR hypertable_schema IS NULL
+  metrics:
+    - view_schema:
+        usage: "LABEL"
+    - view_name:
+        usage: "LABEL"
+    - hypertable_schema:
+        usage: "LABEL"
+    - hypertable_name:
+        usage: "LABEL"
+    - is_materialized_only:
+        usage: "GAUGE"
+    - is_compression_enabled:
+        usage: "GAUGE"
+
+# Rychlý přehled systému
+system_overview:
+  query: |
+    SELECT 
+      active_meters,
+      active_opms,
+      organizations,
+      chunk_count,
+      compressed_chunks,
+      inserts_last_hour,
+      inserts_last_24h
+    FROM meters.grafana_system_status
+  metrics:
+    - active_meters:
+        usage: "GAUGE"
+        description: "Number of active meters"
+    - active_opms:
+        usage: "GAUGE"
+        description: "Number of active OPMs"
+    - organizations:
+        usage: "GAUGE"
+        description: "Number of organizations"
+    - chunk_count:
+        usage: "GAUGE"
+        description: "Total number of chunks"
+    - compressed_chunks:
+        usage: "GAUGE"
+        description: "Number of compressed chunks"
+    - inserts_last_hour:
+        usage: "GAUGE"
+        description: "Inserts in last hour"
+    - inserts_last_24h:
+        usage: "GAUGE"
+        description: "Inserts in last 24 hours"
