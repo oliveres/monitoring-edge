@@ -17,6 +17,8 @@ services:
     networks:
       - monitoring
       - prod_net  # Access to production network (for Caddy, PostgreSQL, etc.)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -75,10 +77,8 @@ services:
     image: prom/node-exporter:latest
     container_name: monitoring-node-exporter
     restart: unless-stopped
-    networks:
-      - monitoring
-    expose:
-      - 9100
+    network_mode: host
+    pid: host
     command:
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
