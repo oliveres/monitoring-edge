@@ -41,7 +41,9 @@ scrape_configs:
           host: '${HOSTNAME}'
     metrics_path: /metrics
     http_headers:
-      Origin: ["http://monitoring-prometheus"]
+      Origin:
+        values:
+          - "http://monitoring-prometheus"
     relabel_configs:
       - source_labels: [__address__]
         regex: '^$'
