@@ -49,7 +49,7 @@ services:
       - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-}
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    image: ghcr.io/google/cadvisor:latest
     container_name: monitoring-cadvisor
     restart: unless-stopped
     privileged: true
