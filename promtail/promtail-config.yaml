@@ -37,6 +37,11 @@ scrape_configs:
 
     # Relabel to set metadata
     relabel_configs:
+      # Drop containers using Loki driver (have label logging=loki)
+      - source_labels: ['__meta_docker_container_label_logging']
+        regex: 'loki'
+        action: drop
+
       # Container name
       - source_labels: ['__meta_docker_container_name']
         regex: '/(.*)'
