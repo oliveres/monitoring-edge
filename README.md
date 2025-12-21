@@ -90,6 +90,60 @@ The edge stack does **not** run a Caddy container; the profile is a convention i
 3. Set `COMPOSE_PROFILES=caddy` and `CADDY_METRICS_TARGET` (e.g. `localhost:2019`) in `.env`.
 4. Reapply the stack (`docker compose up -d`). The Prometheus job `caddy` becomes active and metrics surface in Grafana, e.g. `caddy_admin_http_requests_total{host="edge-host-1"}`.
 
+## Logging Strategy
+
+The edge stack supports two logging approaches that can be used together (hybrid model):
+
+### 1. Promtail (Default)
+
+Promtail collects logs from Docker containers and ships them to central Loki. It uses Docker service discovery with a **positive filter** - only containers with the label `logging=promtail` are collected.
+
+Add to your container's docker-compose.yml:
+```yaml
+services:
+  myapp:
+    labels:
+      logging: promtail
+```
+
+### 2. Loki Docker Driver (Streaming)
+
+For high-traffic containers where disk writes are undesirable (e.g., reverse proxies, API gateways), use the Loki Docker logging driver. Logs stream directly to Loki without touching the local disk.
+
+**Installation** (one-time per host):
+```bash
+docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+```
+
+**Container configuration**:
+```yaml
+services:
+  caddy:
+    labels:
+      logging: loki  # Tells Promtail to ignore this container
+    logging:
+      driver: loki
+      options:
+        loki-url: "https://user:password@monitoring.example.com/loki/api/v1/push"
+        loki-external-labels: "container={{.Name}},host=myhost,job=docker"
+        loki-retries: "3"
+        loki-batch-size: "400"
+        no-file: "true"  # Disable local disk writes
+```
+
+**Important notes**:
+- URL-encode special characters in password (e.g., `@` → `%40`)
+- With `no-file: true`, `docker logs` command won't work
+- The `logging: loki` label prevents Promtail from attempting to read logs (which would fail)
+
+### Recommended Setup
+
+| Container Type | Logging Method | Label |
+|----------------|----------------|-------|
+| High-traffic (Caddy, nginx, API) | Loki Docker Driver | `logging: loki` |
+| Standard applications | Promtail | `logging: promtail` |
+| No logging needed | None | (no label) |
+
 ## Verification Checklist
 
 1. `docker ps | grep monitoring-` – confirms the selected services are running.
